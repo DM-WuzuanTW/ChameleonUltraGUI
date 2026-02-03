@@ -1,238 +1,18 @@
-import 'dart:typed_data';
 import 'dart:convert';
 import 'package:chameleonultragui/helpers/colors.dart' as colors;
-import 'package:chameleonultragui/helpers/definitions.dart';
-import 'package:chameleonultragui/helpers/general.dart';
+import 'package:chameleonultragui/helpers/definitions.dart'; // TagType
+import 'package:chameleonultragui/helpers/general.dart'; // hexToColor etc
+import 'package:chameleonultragui/models/card_save.dart';
+import 'package:chameleonultragui/models/dictionary.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:uuid/uuid.dart';
+
+// Exports for backward compatibility
+export 'package:chameleonultragui/models/card_save.dart';
+export 'package:chameleonultragui/models/dictionary.dart';
 
 // Localizations
 import 'package:chameleonultragui/generated/i18n/app_localizations.dart';
-
-class Dictionary {
-  String id;
-  String name;
-  List<Uint8List> keys;
-  Color color;
-  int keyLength;
-
-  factory Dictionary.fromJson(String json) {
-    Map<String, dynamic> data = jsonDecode(json);
-    final id = data['id'] as String;
-    final name = data['name'] as String;
-    final encodedKeys = data['keys'] as List<dynamic>;
-    if (data['color'] == null) {
-      data['color'] = colorToHex(Colors.deepOrange);
-    }
-
-    if (data['keyLength'] == null) {
-      // legacy
-      data['keyLength'] = 12;
-    }
-
-    final keyLength = data['keyLength'] as int;
-    final color = hexToColor(data['color']);
-
-    List<Uint8List> keys = [];
-    for (var key in encodedKeys) {
-      keys.add(Uint8List.fromList(List<int>.from(key)));
-    }
-    return Dictionary(
-        id: id, name: name, keys: keys, color: color, keyLength: keyLength);
-  }
-
-  String toJson() {
-    return jsonEncode({
-      'id': id,
-      'name': name,
-      'color': colorToHex(color),
-      'keys': keys.map((key) => key.toList()).toList(),
-      'keyLength': keyLength
-    });
-  }
-
-  @override
-  String toString() {
-    String output = "";
-    for (var key in keys) {
-      output += "${bytesToHex(key).toUpperCase()}\n";
-    }
-    return output;
-  }
-
-  Uint8List toFile() {
-    return const Utf8Encoder().convert(toString());
-  }
-
-  factory Dictionary.fromString(String input,
-      {String name = '', Color color = Colors.deepOrange}) {
-    List<Uint8List> keys = [];
-    List<int> allowedKeySizes = [
-      12, // 6 - Mifare Classic
-      8, // 4 - Mifare Ultralight / T55XX
-      32, // 16 - Mifare Ultralight C / AES / Mifare Plus
-    ];
-    int currentKeySize = 0;
-
-    for (var key in input.split("\n")) {
-      key = key.trim().replaceAll('#', ' ');
-
-      if (key.contains(' ')) {
-        key = key.split(' ')[0];
-      }
-
-      if (allowedKeySizes.contains(key.length) &&
-          isValidHexString(key) &&
-          (currentKeySize == 0 || currentKeySize == key.length)) {
-        if (currentKeySize == 0) {
-          currentKeySize = key.length;
-        }
-
-        keys.add(hexToBytes(key));
-      }
-    }
-
-    return Dictionary(
-        id: const Uuid().v4(),
-        name: name,
-        keys: keys,
-        color: color,
-        keyLength: currentKeySize);
-  }
-
-  Dictionary(
-      {String? id,
-      this.name = "",
-      this.keys = const [],
-      this.color = Colors.deepOrange,
-      this.keyLength = 0})
-      : id = id ?? const Uuid().v4();
-}
-
-class CardSave {
-  String id;
-  String uid;
-  int sak;
-  Uint8List atqa;
-  Uint8List ats;
-  String name;
-  TagType tag;
-  List<Uint8List> data;
-  CardSaveExtra extraData;
-  Color color;
-
-  factory CardSave.fromJson(String json) {
-    Map<String, dynamic> data = jsonDecode(json);
-    final id = data['id'] as String;
-    final uid = data['uid'] as String;
-    final sak = data['sak'] as int;
-    final atqa = List<int>.from(data['atqa'] as List<dynamic>);
-    final ats = List<int>.from((data['ats'] ?? []) as List<dynamic>);
-    final name = data['name'] as String;
-    final tag = getTagTypeByValue(data['tag']);
-    final extraData = CardSaveExtra.import(data['extra'] ?? {});
-    final color =
-        data['color'] == null ? Colors.deepOrange : hexToColor(data['color']);
-    List<Uint8List> tagData = (data['data'] as List<dynamic>)
-        .map((e) => Uint8List.fromList(List<int>.from(e)))
-        .toList();
-
-    return CardSave(
-        id: id,
-        uid: uid,
-        sak: sak,
-        name: name,
-        tag: tag,
-        data: tagData,
-        color: color,
-        extraData: extraData,
-        ats: Uint8List.fromList(ats),
-        atqa: Uint8List.fromList(atqa));
-  }
-
-  String toJson() {
-    return jsonEncode({
-      'id': id,
-      'uid': uid,
-      'sak': sak,
-      'atqa': atqa.toList(),
-      'ats': ats.toList(),
-      'name': name,
-      'tag': tag.value,
-      'color': colorToHex(color),
-      'data': data.map((data) => data.toList()).toList(),
-      'extra': extraData.export(),
-    });
-  }
-
-  CardSave({
-    String? id,
-    required this.uid,
-    required this.name,
-    required this.tag,
-    int? sak,
-    Uint8List? atqa,
-    Uint8List? ats,
-    CardSaveExtra? extraData,
-    this.color = Colors.deepOrange,
-    this.data = const [],
-  })  : id = id ?? const Uuid().v4(),
-        sak = sak ?? 0,
-        atqa = atqa ?? Uint8List(0),
-        ats = ats ?? Uint8List(0),
-        extraData = extraData ?? CardSaveExtra();
-}
-
-class CardSaveExtra {
-  Uint8List ultralightSignature;
-  Uint8List ultralightVersion;
-  List<int> ultralightCounters;
-
-  factory CardSaveExtra.import(Map<String, dynamic> data) {
-    List<int> readBytes(Map<String, dynamic> data, String key) {
-      return List<int>.from(
-          data[key] != null ? data[key] as List<dynamic> : []);
-    }
-
-    final ultralightSignature = readBytes(data, 'ultralightSignature');
-    final ultralightVersion = readBytes(data, 'ultralightVersion');
-    final ultralightCounters = data['ultralightCounters'] != null
-        ? List<int>.from(data['ultralightCounters'] as List<dynamic>)
-        : <int>[];
-
-    return CardSaveExtra(
-        ultralightSignature: Uint8List.fromList(ultralightSignature),
-        ultralightVersion: Uint8List.fromList(ultralightVersion),
-        ultralightCounters: ultralightCounters);
-  }
-
-  Map<String, dynamic> export() {
-    Map<String, dynamic> json = {};
-
-    if (ultralightSignature.isNotEmpty) {
-      json['ultralightSignature'] = ultralightSignature;
-    }
-
-    if (ultralightVersion.isNotEmpty) {
-      json['ultralightVersion'] = ultralightVersion;
-    }
-
-    if (ultralightCounters.isNotEmpty) {
-      json['ultralightCounters'] = ultralightCounters;
-    }
-
-    return json;
-  }
-
-  CardSaveExtra(
-      {Uint8List? ultralightSignature,
-      Uint8List? ultralightVersion,
-      List<int>? ultralightCounters})
-      : ultralightSignature = ultralightSignature ?? Uint8List(0),
-        ultralightVersion = ultralightVersion ?? Uint8List(0),
-        ultralightCounters = ultralightCounters ?? <int>[];
-}
 
 class SharedPreferencesProvider extends ChangeNotifier {
   SharedPreferencesProvider._privateConstructor();
@@ -246,8 +26,34 @@ class SharedPreferencesProvider extends ChangeNotifier {
 
   late SharedPreferences _sharedPreferences;
 
+  // In-memory cache
+  List<Dictionary> _dictionaries = [];
+  List<CardSave> _cards = [];
+
   Future<void> load() async {
     _sharedPreferences = await SharedPreferences.getInstance();
+
+    // Load Dictionaries into memory
+    _dictionaries = [];
+    final dictsData = _sharedPreferences.getStringList('dictionaries') ?? [];
+    for (var dictionary in dictsData) {
+      try {
+        _dictionaries.add(Dictionary.fromJson(dictionary));
+      } catch (e) {
+        debugPrint("Error loading dictionary: $e");
+      }
+    }
+
+    // Load Cards into memory
+    _cards = [];
+    final cardsData = _sharedPreferences.getStringList('cards') ?? [];
+    for (var card in cardsData) {
+      try {
+        _cards.add(CardSave.fromJson(card));
+      } catch (e) {
+        debugPrint("Error loading card: $e");
+      }
+    }
   }
 
   ThemeMode getTheme() {
@@ -317,20 +123,19 @@ class SharedPreferencesProvider extends ChangeNotifier {
   }
 
   List<Dictionary> getDictionaries({int keyLength = 0}) {
-    List<Dictionary> output = [];
-    final data = _sharedPreferences.getStringList('dictionaries') ?? [];
-    for (var dictionary in data) {
-      Dictionary dict = Dictionary.fromJson(dictionary);
-      if (keyLength == 0 || dict.keyLength == keyLength) {
-        output.add(dict);
-      }
+    if (keyLength == 0) {
+      // Return a copy to avoid external modification affecting cache without calling setDictionaries
+      // or implement unmodifiable list if strictness is needed.
+      // For now, returning a new list instance is safer.
+      return List.from(_dictionaries);
     }
-    return output;
+    return _dictionaries.where((d) => d.keyLength == keyLength).toList();
   }
 
   void setDictionaries(List<Dictionary> dictionaries) {
+    _dictionaries = dictionaries;
     List<String> output = [];
-    for (var dictionary in dictionaries) {
+    for (var dictionary in _dictionaries) {
       if (dictionary.id != "") {
         // system empty dictionary, never save it
         output.add(dictionary.toJson());
@@ -340,17 +145,13 @@ class SharedPreferencesProvider extends ChangeNotifier {
   }
 
   List<CardSave> getCards() {
-    List<CardSave> output = [];
-    final data = _sharedPreferences.getStringList('cards') ?? [];
-    for (var tag in data) {
-      output.add(CardSave.fromJson(tag));
-    }
-    return output;
+    return List.from(_cards);
   }
 
   void setCards(List<CardSave> cards) {
+    _cards = cards;
     List<String> output = [];
-    for (var card in cards) {
+    for (var card in _cards) {
       output.add(card.toJson());
     }
     _sharedPreferences.setStringList('cards', output);
@@ -432,7 +233,6 @@ class SharedPreferencesProvider extends ChangeNotifier {
         continue;
       }
       if (value is List) {
-        // this hack is needed in order to output proper json with objects instead of objects-in-strings
         value = value.map((e) => jsonDecode(e)).toList();
       }
       settingsMap[key] = value;
@@ -464,7 +264,6 @@ class SharedPreferencesProvider extends ChangeNotifier {
           _sharedPreferences.setBool(key, b);
           break;
         case List l:
-          // this is the reverse of the hack above :)
           _sharedPreferences.setStringList(
               key, l.map((e) => jsonEncode(e)).toList());
           break;
